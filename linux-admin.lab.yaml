@@ -1,0 +1,170 @@
+# Linux administration: users, a shared folder, cron and a service
+# Four small administration jobs on one Ubuntu server, each marked from what was saved.
+# Everything is installed by the setup below, from Ubuntu's archive, the first time it starts.
+cpus: 1
+memory: 1024    # MB
+disk: 10        # GB
+
+# Nothing opens in the browser: the lab is the terminal.
+open: []
+
+# Run once, as root. Its output is kept in /var/log/mitsurutech-setup.log on the VM.
+setup: |
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq cron
+  systemctl enable cron >/dev/null 2>&1
+  install -d -m 755 /srv/projects
+  cat > /usr/local/bin/backup.sh <<'LABADMIN_BACKUP_END'
+  #!/bin/sh
+  # Copies the shared projects folder to /var/backups/projects.
+  mkdir -p /var/backups/projects
+  cp -a /srv/projects/. /var/backups/projects/
+  echo "$(date -Is) backup finished" >> /var/log/backup.log
+  LABADMIN_BACKUP_END
+  cat > /usr/local/bin/heartbeat.sh <<'LABADMIN_HEARTBEAT_END'
+  #!/bin/sh
+  # Writes the time to /var/log/heartbeat.log once a minute, for as long as it runs.
+  while true; do
+    date -Is >> /var/log/heartbeat.log
+    sleep 60
+  done
+  LABADMIN_HEARTBEAT_END
+  chmod 755 /usr/local/bin/backup.sh /usr/local/bin/heartbeat.sh
+  home=/home/student
+  [ -d $home ] || home=/root
+  cat > $home/README.md <<'LABADMIN_README_END'
+  # Lab: Linux administration
+
+  You are the administrator of this server. Four small jobs, each one the kind of thing a
+  sysadmin does in the first week. Use sudo, and save your work the way the system saves it:
+  what counts is what is still true after the machine restarts.
+
+  ## Task 1: a user and a group
+
+  Make an ordinary group called devs and an ordinary user called maria. Maria needs a home
+  folder at /home/maria, bash as her login shell, and to be a member of devs. She is not an
+  administrator, so she must not be in sudo or adm.
+
+  ## Task 2: a shared folder
+
+  /srv/projects exists but belongs to root and nobody else can use it. Make it the devs team's
+  folder: the group is devs, every member of devs can read, write and enter it, and a file one
+  of them creates in it belongs to the devs group automatically, whoever made it. Everybody who
+  is not in devs has no access at all, not even to list it.
+
+  ## Task 3: a scheduled job
+
+  /usr/local/bin/backup.sh copies the projects folder to /var/backups/projects. Make the system
+  run it as root every day at 02:30. Put the job in a file called /etc/cron.d/backup (the system
+  cron folder, not a user's crontab) and remember what a line in that folder has that a user's
+  crontab line does not. Check that the file is written the way cron needs it, because cron
+  ignores a file it does not like without saying so.
+
+  ## Task 4: a service
+
+  /usr/local/bin/heartbeat.sh writes the time to /var/log/heartbeat.log every minute for as
+  long as it runs. Make it a systemd service called heartbeat: a unit file in
+  /etc/systemd/system, started by systemd as that script, restarted by systemd if it ever
+  fails, and enabled so that it starts at every boot. Then start it and watch the log grow.
+
+  ## Marking
+
+  Whoever marks this lab runs a check on a copy of your saved machine after a fresh start. It
+  goes through the four tasks in order and stops at the first one that is not right, saying
+  which and why. Things that are only true until the next restart do not count.
+
+  ## Tools
+
+  id, getent, ls -ld, stat, systemctl and journalctl show you what the machine thinks of
+  what you have done.
+  LABADMIN_README_END
+  chown student:student $home/README.md 2>/dev/null
+  echo "Read README.md in your home folder first." > /etc/motd
+
+# Marks a handed-in VM: run as root on a copy of the saved disk after a fresh boot, so it sees
+# only what was saved. Its exit status is the result: 0 passes, and its first line says why not.
+check: |
+  fail() {
+    echo "NOT PASSED: $*"
+    exit 1
+  }
+  for f in /usr/local/bin/backup.sh /usr/local/bin/heartbeat.sh; do
+    [ -x $f ] || fail "$f is missing or not executable: the lab's own script was changed"
+  done
+
+  # Task 1: a user and a group.
+  getent group devs >/dev/null || fail "task 1: there is no group devs"
+  gid=$(getent group devs | cut -d: -f3)
+  [ "$gid" -ge 1000 ] || fail "task 1: devs is a system group (gid $gid), not an ordinary one"
+  getent passwd maria >/dev/null || fail "task 1: there is no user maria"
+  entry=$(getent passwd maria)
+  [ "$(echo "$entry" | cut -d: -f3)" -ge 1000 ] || fail "task 1: maria is a system account, not an ordinary user"
+  [ "$(echo "$entry" | cut -d: -f7)" = /bin/bash ] || fail "task 1: maria's login shell is $(echo "$entry" | cut -d: -f7), not bash"
+  [ "$(echo "$entry" | cut -d: -f6)" = /home/maria ] || fail "task 1: maria's home is $(echo "$entry" | cut -d: -f6), not /home/maria"
+  [ -d /home/maria ] && [ "$(stat -c %U /home/maria)" = maria ] || fail "task 1: /home/maria does not exist or is not maria's"
+  groups=$(id -nG maria | tr ' ' '\n')
+  echo "$groups" | grep -qx devs || fail "task 1: maria is not a member of devs"
+  echo "$groups" | grep -Eqx 'sudo|adm|root' && fail "task 1: maria has administrator rights (sudo, adm or root): she should not"
+
+  # Task 2: a shared folder.
+  d=/srv/projects
+  [ -d $d ] && [ ! -L $d ] || fail "task 2: $d is not a folder"
+  [ "$(stat -c %G $d)" = devs ] || fail "task 2: the group of $d is $(stat -c %G $d), not devs"
+  mode=$(stat -c %a $d)
+  [ "$mode" = 2770 ] || {
+    why="its mode is $mode"
+    case "$mode" in 2*) ;; *) why="$why: a file made in it will not belong to devs" ;; esac
+    case "$mode" in *[1-7]) why="$why: users outside devs can still get in" ;; esac
+    case "$mode" in *7?) ;; *) why="$why: members of devs cannot all read, write and enter it" ;; esac
+    fail "task 2: $d is not set up as asked, $why"
+  }
+  t=$d/.check-$$
+  runuser -u maria -- touch $t 2>/dev/null || fail "task 2: maria cannot create a file in $d"
+  [ "$(stat -c %G $t)" = devs ] || { g=$(stat -c %G $t); rm -f $t; fail "task 2: a file maria creates in $d belongs to group $g, not devs"; }
+  rm -f $t
+  runuser -u nobody -- ls $d >/dev/null 2>&1 && fail "task 2: a user outside devs can list $d"
+  runuser -u nobody -- touch $t 2>/dev/null && { rm -f $t; fail "task 2: a user outside devs can create files in $d"; }
+
+  # Task 3: a scheduled job, in the system cron folder.
+  f=/etc/cron.d/backup
+  [ -f $f ] && [ ! -L $f ] || fail "task 3: $f does not exist (or is not a plain file)"
+  [ "$(stat -c %U $f)" = root ] || fail "task 3: $f must belong to root, or cron ignores it"
+  p=$(stat -c %A $f)
+  { [ "$(echo $p | cut -c6)" = - ] && [ "$(echo $p | cut -c9)" = - ]; } || fail "task 3: $f is writable by others, so cron ignores it"
+  [ -z "$(tail -c 1 $f)" ] || fail "task 3: the last line of $f has no newline at its end, so cron ignores it"
+  jobs=$(grep -Ev '^[[:space:]]*(#|$)' $f | grep -Ev '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=')
+  [ -n "$jobs" ] || fail "task 3: $f has no job in it"
+  [ "$(echo "$jobs" | wc -l)" = 1 ] || fail "task 3: $f has more than one job, it should have the one"
+  set -f
+  set -- $jobs
+  set +f
+  [ "$1" = 30 ] || fail "task 3: the minute is $1, not 30"
+  { [ "$2" = 2 ] || [ "$2" = 02 ]; } || fail "task 3: the hour is $2, not 2"
+  { [ "$3" = '*' ] && [ "$4" = '*' ] && [ "$5" = '*' ]; } || fail "task 3: the job is not every day ($3 $4 $5 after the time)"
+  [ "$6" = root ] || fail "task 3: the user field is $6, it must be root (a file in /etc/cron.d has one before the command)"
+  [ "$7" = /usr/local/bin/backup.sh ] || fail "task 3: the command is $7, not /usr/local/bin/backup.sh"
+
+  # Task 4: a service, its unit file and the link enable makes.
+  u=/etc/systemd/system/heartbeat.service
+  [ -f $u ] && [ ! -L $u ] || fail "task 4: $u does not exist (or is not a plain file)"
+  get() {
+    awk -v want="[$1]" -v key="$2" '{ line=$0; sub(/^[ \t]+/, "", line) } line ~ /^\[/ { sec=line; sub(/[ \t]+$/, "", sec); next } sec==want && index(line, key "=")==1 { print substr(line, length(key)+2) }' $u
+  }
+  set -f
+  set -- $(get Service ExecStart | head -1)
+  set +f
+  [ "$1" = /usr/local/bin/heartbeat.sh ] || fail "task 4: ExecStart in [Service] is not /usr/local/bin/heartbeat.sh"
+  restart=$(get Service Restart | head -1)
+  case "$restart" in on-failure|always) ;; *) fail "task 4: systemd would not restart it if it failed (Restart in [Service] is '$restart')" ;; esac
+  kind=$(get Service Type | head -1)
+  case "$kind" in ''|simple) ;; *) fail "task 4: Type=$kind does not suit a script that loops forever" ;; esac
+  get Install WantedBy | grep -qw multi-user.target || fail "task 4: the unit has no WantedBy=multi-user.target in [Install], so nothing can enable it"
+  w=/etc/systemd/system/multi-user.target.wants/heartbeat.service
+  [ -L $w ] || fail "task 4: heartbeat is not enabled, nothing starts it at boot"
+  [ "$(readlink -f $w)" = $u ] || fail "task 4: the enable link points at $(readlink -f $w), not at $u"
+  if command -v systemd-analyze >/dev/null 2>&1; then
+    problems=$(systemd-analyze verify $u 2>&1 | head -1)
+    [ -z "$problems" ] || fail "task 4: systemd finds a problem in the unit: $problems"
+  fi
+  echo "PASSED: maria is in devs, /srv/projects is the team's folder, the 02:30 backup job is in /etc/cron.d and heartbeat is an enabled service"
