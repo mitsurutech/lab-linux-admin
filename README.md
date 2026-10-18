@@ -1,5 +1,7 @@
 # Linux administration lab: users, permissions, cron and systemd in one Ubuntu VM
 
+[English](README.md) | [Français](README.fr.md) | [日本語](README.ja.md) | [Español](README.es.md)
+
 [![check](https://github.com/mitsurutech/lab-linux-admin/actions/workflows/check.yml/badge.svg)](https://github.com/mitsurutech/lab-linux-admin/actions/workflows/check.yml)
 
 A ready-made **Linux administration lab** for classrooms, from the [MitsuruTech Learning Platform](https://mitsurutech.co.uk/learning), where schools and colleges give every student their own Ubuntu machine and a terminal in the browser. The student is the administrator of a small server and does four jobs a first-year sysadmin does: **add a user and a group**, **set the permissions of a shared folder**, **schedule a job with cron** and **write and enable a systemd service**. Nothing is installed on the student's computer, and the lab is marked by a script, so a teacher does not have to read each machine.
@@ -57,4 +59,6 @@ More labs from the same place: [lab-netlab](https://github.com/mitsurutech/lab-n
 
 ## Licence
 
-The lab definition and this documentation are MIT licensed, see [LICENSE](LICENSE): copy them, change them, teach with them. `cron` is installed from Ubuntu's archive when a VM starts; nothing of it is distributed here.
+This work is licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/). You may share it and adapt it for learning and teaching, if you credit Mitsuru Technologies Ltd, do not use it commercially, and share anything you make from it under the same licence. The full text is in the `LICENSE` file.
+
+`cron` is installed from Ubuntu's archive when a VM starts; nothing of it is distributed here.
